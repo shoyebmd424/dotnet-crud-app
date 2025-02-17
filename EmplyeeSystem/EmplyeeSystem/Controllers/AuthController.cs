@@ -1,16 +1,13 @@
-﻿using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
-using EmplyeeSystem.Model;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using EmplyeeSystem.Model;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Configuration;
 
 namespace EmplyeeSystem.Controllers
 {
-    [Route("api/[controller]")]
-    [ApiController]
+    [Route("auth")]
     public class AuthController : Controller
     {
         private readonly UserManager<User> _userManager;
@@ -20,89 +17,101 @@ namespace EmplyeeSystem.Controllers
         private readonly string? _audience;
         private readonly int _expiry;
 
-        public AuthController(UserManager<User> user,SignInManager<User> signInManager,IConfiguration configuration)
+        public AuthController(UserManager<User> userManager, SignInManager<User> signInManager, IConfiguration configuration)
         {
-            
-           _userManager = user;
-            _signInManager=signInManager;
+            _userManager = userManager;
+            _signInManager = signInManager;
             jwtKey = configuration["Jwt:Key"];
             _issuer = configuration["Jwt:Issuer"];
             _audience = configuration["Jwt:Audience"];
             _expiry = int.Parse(configuration["Jwt:ExpiryMinutes"]);
-            
         }
-        [HttpPost("signup")]
-        public async Task<IActionResult> Registration([FromBody] Registration model)
+
+        // GET: /Auth/Signup
+        [HttpGet]
+        public IActionResult Signup()
         {
-            try
+            return View();
+        }
+
+        // POST: /Auth/Signup
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Signup(Registration model)
+        {
+            if (ModelState.IsValid)
             {
-                if (model == null || model.FirstName == null || model.LastName == null || model.Email == null || model.Password == null)
-                {
-                    return BadRequest("All fields are required!");
-                }
                 var isExistUser = await _userManager.FindByEmailAsync(model.Email);
                 if (isExistUser != null)
                 {
-                    return Conflict("An account with this email already exists.");
+                    ModelState.AddModelError("Email", "An account with this email already exists.");
+                    return View(model);
                 }
+
                 var user = new User
                 {
                     UserName = model.FirstName,
                     Email = model.Email,
                 };
+
                 var res = await _userManager.CreateAsync(user, model.Password);
                 if (!res.Succeeded)
                 {
-                    var errors = string.Join(", ", res.Errors.Select(e => e.Description));
-                    return BadRequest(errors);
+                    foreach (var error in res.Errors)
+                    {
+                        ModelState.AddModelError(string.Empty, error.Description);
+                    }
+                    return View(model);
                 }
-                return Ok("Registration completed successfully!");
+
+                return RedirectToAction("Login");
             }
-            catch (Exception ex) { 
-                return BadRequest($"An error occurred: {ex.Message}");
-            }
+
+            return View(model);
         }
+
+        // GET: /Auth/Login
+        [HttpGet("login")]
+        public IActionResult Login()
+        {
+            return View();
+        }
+
+        // POST: /Auth/Login
         [HttpPost("login")]
-        public async Task<IActionResult> login([FromBody] LoginModel model)
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> Login(LoginModel model)
         {
-            try
+            if (ModelState.IsValid)
             {
-                User user = await _userManager.FindByEmailAsync(model.email);
-                if (user == null) return Unauthorized(new { success = false, message = "Ivalid Username or email" });
-                var result = _signInManager.CheckPasswordSignInAsync(user, model.Password, false);
-                if (result.IsCanceled) return Unauthorized(new { success = false, message = "invalid credentials...." });
+                User user = await _userManager.FindByEmailAsync(model.Email);
+                if (user == null)
+                {
+                    ModelState.AddModelError(string.Empty, "Invalid username or email.");
+                    return View(model);
+                }
 
-                var token = GenerateToke(user);
-                return Ok(new { success = true, token });
+                var result = await _signInManager.PasswordSignInAsync(user, model.Password, false, false);
+                if (result.Succeeded)
+                {
+                    return RedirectToAction("Index", "Home");
+                }
+                else
+                {
+                    ModelState.AddModelError(string.Empty, "Invalid credentials.");
+                }
+            }
 
-            }
-            catch (Exception ex)
-            {
-                return BadRequest($"An error occurred: {ex.Message}");
-            }
+            return View(model);
         }
 
-        private String GenerateToke(User user)
-        {
-            var claims = new[] { 
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id) ,
-                new Claim(JwtRegisteredClaimNames.Email, user.Email) ,
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) ,
-                new Claim("Name",   user.Email) ,
-            };
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-            var token = new JwtSecurityToken(claims: claims, expires: DateTime.Now.AddMinutes(_expiry), signingCredentials: creds);
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        }
-
+        // GET: /Auth/Logout
         [HttpPost("logout")]
         [Authorize]
-        public async Task<IActionResult> logout()
+        public async Task<IActionResult> Logout()
         {
             await _signInManager.SignOutAsync();
-            return Ok("logout successfully");
+            return RedirectToAction("Login");
         }
     }
-
-    }
+}

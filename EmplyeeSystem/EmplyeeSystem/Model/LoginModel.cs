@@ -1,8 +1,8 @@
-﻿namespace EmplyeeSystem.Controllers
+﻿namespace EmplyeeSystem.Model
 {
     public class LoginModel
     {
-        public String email { get; set; }
-        public String Password { get; set; }
+        public string Email { get; set; }
+        public string Password { get; set; }
     }
 }
